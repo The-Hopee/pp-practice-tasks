@@ -1,10 +1,5 @@
 package practice3;
 
-import java.awt.Color;
-import java.awt.image.BufferedImage;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.concurrent.ExecutionException;
@@ -12,21 +7,16 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
-import javax.imageio.ImageIO;
 
 /** ДЗ3: параллельный расчёт каждого пикселя множества Мандельброта. */
 /*
    Запуск из папки practice3 (Java 17+):
-   java -jar Mandelbrot.jar --verify --png mandelbrot.png
+   java -jar Mandelbrot.jar --verify
    java -jar Mandelbrot.jar --check
    java -jar Mandelbrot.jar --width 100 --height 40 --iterations 100 --threads 6 --ascii
 
-   Если Java отсутствует в PATH, скрипт ищет её также в JAVA_HOME и %USERPROFILE%\.jdks:
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\run.ps1 --verify --png mandelbrot.png
-
    Параметры опциональны. По умолчанию: 1000x720, 1000 итераций, до 6 потоков.
-   PNG и ASCII выводятся по соответствующим флагам, запись изображения не входит
-   в время расчёта. mandelbrot.png - изображение, report.pdf - отчёт.
+   ASCII выводится по флагу --ascii и не входит в время расчёта.
 
    Пересборка из этой папки, JDK 17+:
    javac --release 17 -encoding UTF-8 -d build Mandelbrot.java
@@ -122,23 +112,6 @@ public class Mandelbrot {
         return result;
     }
 
-    private void saveImage(int[][] result, Path path) throws IOException {
-        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                int iterations = result[y][x];
-                int color = iterations == INSIDE ? Color.BLACK.getRGB()
-                        : Color.HSBtoRGB((float) (0.58 + 0.025 * iterations), 0.8f, 1.0f);
-                image.setRGB(x, y, color);
-            }
-        }
-        Path parent = path.toAbsolutePath().getParent();
-        Files.createDirectories(parent);
-        if (!ImageIO.write(image, "png", path.toFile())) {
-            throw new IOException("PNG encoder not available");
-        }
-    }
-
     private void printAscii(int[][] result) {
         String chars = " .:-=+*#%@";
         // Уменьшаем только вывод, расчёт всё равно выполнен для каждого пикселя.
@@ -185,7 +158,6 @@ public class Mandelbrot {
     public static void main(String[] args) throws Exception {
         int width = 1000, height = 720, maxIterations = 1000;
         int threads = Math.min(6, Runtime.getRuntime().availableProcessors());
-        Path png = null;
         boolean ascii = false, verify = false;
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
@@ -193,7 +165,6 @@ public class Mandelbrot {
                 case "--height" -> height = Integer.parseInt(args[++i]);
                 case "--iterations" -> maxIterations = Integer.parseInt(args[++i]);
                 case "--threads" -> threads = Integer.parseInt(args[++i]);
-                case "--png" -> png = Path.of(args[++i]);
                 case "--ascii" -> ascii = true;
                 case "--verify" -> verify = true;
                 case "--check" -> { selfTest(); return; }
@@ -201,7 +172,7 @@ public class Mandelbrot {
             }
         }
         Mandelbrot fractal = new Mandelbrot(width, height, maxIterations);
-        // Короткий прогрев до замера, без вывода и записи изображения.
+        // Короткий прогрев до замера, без вывода.
         new Mandelbrot(100, 72, maxIterations).calculateParallel(threads);
         long start = System.nanoTime();
         int[][] result = fractal.calculateParallel(threads);
@@ -223,10 +194,6 @@ public class Mandelbrot {
             check(Arrays.deepEquals(reference, result), "Parallel and sequential pixels differ");
             System.out.printf(Locale.ROOT, "Sequential: %.3f ms; speedup: %.2f; every pixel matches%n",
                     sequential, sequential / elapsed);
-        }
-        if (png != null) {
-            fractal.saveImage(result, png);
-            System.out.println("PNG: " + png.toAbsolutePath());
         }
         if (ascii) fractal.printAscii(result);
     }

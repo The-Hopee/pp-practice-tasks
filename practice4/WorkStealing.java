@@ -1,9 +1,5 @@
 package practice4;
 
-import java.io.PrintWriter;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -25,12 +21,8 @@ import java.util.concurrent.atomic.AtomicReference;
 /*
    Запуск из папки practice4 (Java 17+):
    java -jar WorkStealing.jar --check
-   java -jar WorkStealing.jar --csv benchmark.csv
-   java -jar WorkStealing.jar --tasks 480 --threads 6 --mean 4 --warmups 2 --repeats 5 --csv benchmark-new.csv
-
-   Если Java отсутствует в PATH, скрипт ищет её также в JAVA_HOME и %USERPROFILE%\.jdks:
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\run.ps1 --check
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\run.ps1 --csv benchmark.csv
+   java -jar WorkStealing.jar
+   java -jar WorkStealing.jar --tasks 480 --threads 6 --mean 4 --warmups 2 --repeats 5
 
    По умолчанию: 240 задач, 6 работников в пулах, средняя сложность 4,
    1 прогрев и 3 измерения на случай. Исходные 100000 задач уменьшены, чтобы
@@ -52,7 +44,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
    Полное время включает конструктор, подачу и завершение задач; время подачи
    включает конструктор и execute. Задачи могут выполняться ещё во время подачи.
-   Генерация задач, печать и запись CSV исключены из замера. Каждый запуск
+   Генерация задач и печать исключены из замера. Каждый запуск
    проверяет завершение всех задач и отсутствие ошибок.
 
    --check проверяет выполнение ровно один раз, повторный и пустой shutdown,
@@ -60,8 +52,8 @@ import java.util.concurrent.atomic.AtomicReference;
    и нормировку распределений.
 
    Результаты замеров и выводы находятся ниже в комментарии RESULTS_BEGIN.
-   Все повторы, параметры и число завершённых задач сохранены в benchmark.csv;
-   report.pdf - отчёт. Это учебный стенд, не JMH; влияют JIT, ОС и фоновые задачи.
+   Новые замеры выводятся в консоль. Это учебный стенд, не JMH;
+   влияют JIT, ОС и фоновые задачи.
 
    Документация Oracle Java SE 21:
    https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/ExecutorService.html
@@ -410,8 +402,14 @@ public class WorkStealing {
        CPU   / PARETO                   114.519     133.078       133.137    120.448
 
        Полное время включает создание исполнителя, передачу и завершение задач.
-       Все 72 измеряемых запуска завершили ровно 240 задач; данные всех повторов
-       и время подачи (включая создание исполнителя) сохранены в benchmark.csv.
+       Все 72 измеряемых запуска завершили ровно 240 задач. Медианы времени подачи
+       (включая создание исполнителя), миллисекунды, в том же порядке столбцов:
+       SLEEP / UNIFORM                   12.574       0.342         0.316      0.669
+       SLEEP / PERIODIC                  11.947       0.682         0.384      0.409
+       SLEEP / PARETO                     9.734       1.029         0.283      0.512
+       CPU   / UNIFORM                    8.218       0.301         0.311      0.449
+       CPU   / PERIODIC                   8.776       0.228         0.259      0.362
+       CPU   / PARETO                     8.673       0.379         0.278      0.372
 
        1. PERIODIC специально кладёт тяжёлые задачи в одну очередь RoundRobin.
           Остальные работники простаивают: FixedPool быстрее примерно в 5.7 раза
@@ -434,7 +432,6 @@ public class WorkStealing {
 
     public static void main(String[] args) throws Exception {
         int tasks = 240, threads = 6, mean = 4, warmups = 1, repeats = 3;
-        Path csv = Path.of("benchmark.csv");
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
                 case "--tasks" -> tasks = Integer.parseInt(args[++i]);
@@ -442,7 +439,6 @@ public class WorkStealing {
                 case "--mean" -> mean = Integer.parseInt(args[++i]);
                 case "--warmups" -> warmups = Integer.parseInt(args[++i]);
                 case "--repeats" -> repeats = Integer.parseInt(args[++i]);
-                case "--csv" -> csv = Path.of(args[++i]);
                 case "--check" -> { selfTest(); return; }
                 default -> throw new IllegalArgumentException("Unknown option: " + args[i]);
             }
@@ -456,44 +452,30 @@ public class WorkStealing {
                 tasks, threads, mean, RANDOM_SEED, warmups, repeats);
         System.out.println("SLEEP: milliseconds; CPU: difficulty units; steps/unit=" + ITERATIONS_PER_UNIT);
         System.out.println("Times include executor construction, submission and completion; output is excluded.");
-        Files.createDirectories(csv.toAbsolutePath().getParent());
-        try (PrintWriter writer = new PrintWriter(Files.newBufferedWriter(csv, StandardCharsets.UTF_8))) {
-            writer.println("workload,distribution,executor,trial,submission_ms,total_ms,completed,tasks,threads,mean,warmups,repeats,seed,iterations_per_unit,java,os,logical_cpus");
-            for (Workload workload : Workload.values()) {
-                for (TaskDistribution distribution : TaskDistribution.values()) {
-                    long[] durations = createTaskDurations(distribution, tasks, threads, mean);
-                    System.out.printf("%n%s / %s; total difficulty=%d%n", workload, distribution,
-                            Arrays.stream(durations).sum());
-                    List<List<Measurement>> results = new ArrayList<>();
-                    for (ExecutorKind ignored : ExecutorKind.values()) results.add(new ArrayList<>());
-                    // Перемешивание порядка уменьшает влияние положения в серии и прогрева.
-                    for (int trial = -warmups; trial < repeats; trial++) {
-                        List<ExecutorKind> order = new ArrayList<>(List.of(ExecutorKind.values()));
-                        Collections.shuffle(order, new Random(RANDOM_SEED + trial + 17L * distribution.ordinal()
-                                + 101L * workload.ordinal()));
-                        for (ExecutorKind kind : order) {
-                            Measurement result = measureExecutor(kind, workload, durations, threads);
-                            if (trial >= 0) {
-                                results.get(kind.ordinal()).add(result);
-                                writer.printf(Locale.ROOT,
-                                        "%s,%s,%s,%d,%.3f,%.3f,%d,%d,%d,%d,%d,%d,%d,%d,%s,%s,%d%n",
-                                        workload, distribution, kind, trial + 1, result.submissionMs(), result.totalMs(),
-                                        result.completed(), tasks, threads, mean, warmups, repeats, RANDOM_SEED,
-                                        ITERATIONS_PER_UNIT, System.getProperty("java.version"),
-                                        System.getProperty("os.name"), Runtime.getRuntime().availableProcessors());
-                                writer.flush();
-                            }
-                        }
+        for (Workload workload : Workload.values()) {
+            for (TaskDistribution distribution : TaskDistribution.values()) {
+                long[] durations = createTaskDurations(distribution, tasks, threads, mean);
+                System.out.printf("%n%s / %s; total difficulty=%d%n", workload, distribution,
+                        Arrays.stream(durations).sum());
+                List<List<Measurement>> results = new ArrayList<>();
+                for (ExecutorKind ignored : ExecutorKind.values()) results.add(new ArrayList<>());
+                // Перемешивание порядка уменьшает влияние положения в серии и прогрева.
+                for (int trial = -warmups; trial < repeats; trial++) {
+                    List<ExecutorKind> order = new ArrayList<>(List.of(ExecutorKind.values()));
+                    Collections.shuffle(order, new Random(RANDOM_SEED + trial + 17L * distribution.ordinal()
+                            + 101L * workload.ordinal()));
+                    for (ExecutorKind kind : order) {
+                        Measurement result = measureExecutor(kind, workload, durations, threads);
+                        if (trial >= 0) results.get(kind.ordinal()).add(result);
                     }
-                    for (ExecutorKind kind : ExecutorKind.values()) {
-                        List<Measurement> values = results.get(kind.ordinal());
-                        System.out.printf(Locale.ROOT, "%-18s submit median=%8.3f ms; total median=%8.3f ms%n",
-                                kind, median(values, true), median(values, false));
-                    }
+                }
+                for (ExecutorKind kind : ExecutorKind.values()) {
+                    List<Measurement> values = results.get(kind.ordinal());
+                    System.out.printf(Locale.ROOT, "%-18s submit median=%8.3f ms; total median=%8.3f ms%n",
+                            kind, median(values, true), median(values, false));
                 }
             }
         }
-        System.out.println("CSV: " + csv.toAbsolutePath());
         System.out.println("blackHole sink: " + blackHoleSink);
     }
 }
