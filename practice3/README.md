@@ -24,7 +24,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\run.ps1 --verify --png man
 
 Все параметры опциональны. По умолчанию: 1000x720, 1000 итераций, до 6 потоков.
 PNG и ASCII выводятся только по соответствующим флагам. Расчёт и его замер
-не включают запись PNG. Сборка: `..\build.ps1`, JDK 17+.
+не включают запись PNG. Для пересборки нужен JDK 17+:
+
+```powershell
+javac --release 17 -encoding UTF-8 -d build Mandelbrot.java
+jar --create --file Mandelbrot.jar --main-class practice3.Mandelbrot -C build practice3
+```
 
 ## Проверка 08.10.2026
 
