@@ -22,6 +22,51 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** ДЗ4: сравнение четырёх исполнителей для ожидания и вычислений. */
+/*
+   Запуск из папки practice4 (Java 17+):
+   java -jar WorkStealing.jar --check
+   java -jar WorkStealing.jar --csv benchmark.csv
+   java -jar WorkStealing.jar --tasks 480 --threads 6 --mean 4 --warmups 2 --repeats 5 --csv benchmark-new.csv
+
+   Если Java отсутствует в PATH, скрипт ищет её также в JAVA_HOME и %USERPROFILE%\.jdks:
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\run.ps1 --check
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\run.ps1 --csv benchmark.csv
+
+   По умолчанию: 240 задач, 6 работников в пулах, средняя сложность 4,
+   1 прогрев и 3 измерения на случай. Исходные 100000 задач уменьшены, чтобы
+   ThreadPerTask не создавал чрезмерное число платформенных потоков.
+   При изменении --tasks этот исполнитель по-прежнему создаёт поток на каждую задачу.
+
+   ShutdownableExecutor объединяет Executor и shutdown(). В этой работе shutdown()
+   закрывает приём задач и ждёт все принятые задачи, сохраняя сигнал прерывания.
+   ThreadPerTask создаёт поток на задачу; RoundRobin раздаёт задачи по очередям;
+   WorkStealing берёт свою задачу с начала очереди, чужую - с конца;
+   FixedThreadPool делегирует выполнение стандартному пулу и ждёт awaitTermination.
+   Самодельные пулы учитывают ожидающие и выполняемые задачи через pending.
+
+   UNIFORM, PERIODIC и PARETO нормируются до одинаковой суммы сложности.
+   Один массив с seed=42 используется для всех исполнителей в режимах SLEEP и CPU.
+   Порядок исполнителей перемешивается; в выводе показаны медианы.
+   SLEEP: сложность в миллисекундах. CPU: 200000 шагов на единицу сложности,
+   итог записывается в volatile-поле. Алгоритм blackHole описан возле функции.
+
+   Полное время включает конструктор, подачу и завершение задач; время подачи
+   включает конструктор и execute. Задачи могут выполняться ещё во время подачи.
+   Генерация задач, печать и запись CSV исключены из замера. Каждый запуск
+   проверяет завершение всех задач и отсутствие ошибок.
+
+   --check проверяет выполнение ровно один раз, повторный и пустой shutdown,
+   отказ после закрытия, конкурирующие execute/shutdown, сохранение прерывания
+   и нормировку распределений.
+
+   Результаты замеров и выводы находятся ниже в комментарии RESULTS_BEGIN.
+   Все повторы, параметры и число завершённых задач сохранены в benchmark.csv;
+   report.pdf - отчёт. Это учебный стенд, не JMH; влияют JIT, ОС и фоновые задачи.
+
+   Документация Oracle Java SE 21:
+   https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/ExecutorService.html
+   https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/Executors.html
+*/
 public class WorkStealing {
     enum TaskDistribution { UNIFORM, PERIODIC, PARETO }
     enum Workload { SLEEP, CPU }

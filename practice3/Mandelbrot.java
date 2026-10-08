@@ -15,6 +15,33 @@ import java.util.concurrent.atomic.AtomicInteger;
 import javax.imageio.ImageIO;
 
 /** ДЗ3: параллельный расчёт каждого пикселя множества Мандельброта. */
+/*
+   Запуск из папки practice3 (Java 17+):
+   java -jar Mandelbrot.jar --verify --png mandelbrot.png
+   java -jar Mandelbrot.jar --check
+   java -jar Mandelbrot.jar --width 100 --height 40 --iterations 100 --threads 6 --ascii
+
+   Если Java отсутствует в PATH, скрипт ищет её также в JAVA_HOME и %USERPROFILE%\.jdks:
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\run.ps1 --verify --png mandelbrot.png
+
+   Параметры опциональны. По умолчанию: 1000x720, 1000 итераций, до 6 потоков.
+   PNG и ASCII выводятся по соответствующим флагам, запись изображения не входит
+   в время расчёта. mandelbrot.png - изображение, report.pdf - отчёт.
+
+   Пересборка из этой папки, JDK 17+:
+   javac --release 17 -encoding UTF-8 -d build Mandelbrot.java
+   jar --create --file Mandelbrot.jar --main-class practice3.Mandelbrot -C build practice3
+
+   Проверка 08.10.2026: Intel i5-11400F, Windows 11, Temurin 21.0.12.1.
+   6 потоков - 79.102 мс; один поток - 413.857 мс; ускорение 5.23.
+   Все 720000 пикселей совпали с последовательной версией.
+   124278 пикселей не вышли за радиус 2 за 1000 шагов.
+   Это один пробный замер, а не статистическая оценка ускорения.
+
+   --check проверяет известные точки, выход на последнем шаге и каждый пиксель
+   сеток 101x43, 7x3, 1x1 при 1, 2, 6 и 8 потоках.
+   Алгоритм и распределение строк описаны в комментариях к методам ниже.
+*/
 public class Mandelbrot {
     private static final double X_MIN = -2.5, X_MAX = 1.0;
     private static final double Y_MIN = -1.25, Y_MAX = 1.25;
